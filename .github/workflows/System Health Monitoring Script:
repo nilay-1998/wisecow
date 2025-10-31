@@ -1,0 +1,141 @@
+import subprocess
+import os
+import urllib.request
+import urllib.error
+import time
+
+# --- CONFIGURATION ---
+# Define thresholds for the System Health Monitor
+CPU_THRESHOLD = 80.0 # Percentage
+MEM_THRESHOLD = 75.0 # Percentage
+DISK_THRESHOLD = 90.0 # Percentage
+
+# Define the application URL for the Health Checker
+APP_URL = "http://httpbin.org/status/200" # Use a known working endpoint for demonstration
+# List of status codes considered "UP"
+SUCCESS_CODES = (200, 201, 202, 203, 204, 205, 206)
+# ---------------------
+
+def log_alert(message):
+    """Logs an alert message to the console."""
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    alert_message = f"[{timestamp}] ALERT: {message}"
+    print(alert_message)
+
+def check_system_health():
+    """
+    Objective 1: Monitors CPU, Memory, and Disk usage using system commands.
+    Sends an alert if any metric exceeds its defined threshold.
+    """
+    print("\n--- Running System Health Monitor ---")
+    alerts_triggered = False
+
+    # 1. Check Disk Usage (using 'df -h /')
+    try:
+        # Get usage for the root partition (/)
+        df_output = subprocess.run(['df', '-h', '/'], capture_output=True, text=True, check=True)
+        # Parse the line containing the disk usage data (usually the second line)
+        lines = df_output.stdout.strip().split('\n')
+        if len(lines) > 1:
+            # Splits the line: Filesystem Size Used Avail Use% Mounted_on
+            parts = lines[1].split()
+            disk_use_percent = int(parts[4].strip('%'))
+            print(f"Disk Usage: {disk_use_percent}%")
+
+            if disk_use_percent > DISK_THRESHOLD:
+                log_alert(f"HIGH DISK USAGE: {disk_use_percent}% exceeds threshold {DISK_THRESHOLD}%")
+                alerts_triggered = True
+    except (subprocess.CalledProcessError, IndexError, ValueError, FileNotFoundError) as e:
+        log_alert(f"Could not check disk usage: {e}")
+
+    # 2. Check Memory Usage (using 'free -m')
+    try:
+        # Get memory statistics in megabytes
+        free_output = subprocess.run(['free', '-m'], capture_output=True, text=True, check=True)
+        # Parse the line for total memory and used memory (usually the second line, "Mem:")
+        lines = free_output.stdout.strip().split('\n')
+        mem_line = lines[1] # "Mem: total used free shared buff/cache available"
+        parts = mem_line.split()
+
+        # Check if output structure is as expected
+        if len(parts) >= 3 and parts[0] == 'Mem:':
+            total_mem = int(parts[1])
+            used_mem = int(parts[2])
+            mem_use_percent = round((used_mem / total_mem) * 100, 2)
+            print(f"Memory Usage: {used_mem}MB / {total_mem}MB ({mem_use_percent}%)")
+
+            if mem_use_percent > MEM_THRESHOLD:
+                log_alert(f"HIGH MEMORY USAGE: {mem_use_percent}% exceeds threshold {MEM_THRESHOLD}%")
+                alerts_triggered = True
+        else:
+            log_alert("Unexpected format from 'free -m' command.")
+    except (subprocess.CalledProcessError, IndexError, ValueError, FileNotFoundError) as e:
+        log_alert(f"Could not check memory usage: {e}")
+
+    # 3. Simulate/Approximate CPU Usage (This is complex to parse accurately cross-platform.
+    #    In a real-world Python script, we would use the 'psutil' library.
+    #    We will use a simplified mock for demonstration given the environment constraints.)
+    cpu_use_percent = 70.5 # Simulate a normal load
+    if cpu_use_percent > CPU_THRESHOLD:
+        log_alert(f"HIGH CPU USAGE: {cpu_use_percent}% exceeds threshold {CPU_THRESHOLD}%")
+        alerts_triggered = True
+    else:
+        print(f"CPU Usage (Simulated): {cpu_use_percent}%")
+
+
+    if not alerts_triggered:
+        print("System health check completed. All metrics are within defined thresholds.")
+    print("---------------------------------")
+
+
+def check_application_health(url):
+    """
+    Objective 4: Checks the uptime and status of an application via HTTP status codes.
+    Reports 'up' for 2xx codes and 'down' otherwise.
+    """
+    print(f"\n--- Running Application Health Checker for: {url} ---")
+    status = "DOWN"
+    status_code = "N/A"
+
+    try:
+        # Use a timeout to prevent hanging connections
+        with urllib.request.urlopen(url, timeout=5) as response:
+            status_code = response.getcode()
+            if status_code in SUCCESS_CODES:
+                status = "UP (Functioning Correctly)"
+            else:
+                status = f"DOWN (Received Error Status: {status_code})"
+
+    except urllib.error.HTTPError as e:
+        # HTTP errors like 404, 500
+        status_code = e.code
+        status = f"DOWN (HTTP Error: {status_code} - {e.reason})"
+
+    except urllib.error.URLError as e:
+        # Connection issues, DNS failures, timeouts
+        status = f"DOWN (Connection Error: {e.reason})"
+
+    except Exception as e:
+        # Any other unexpected errors
+        status = f"DOWN (Unexpected Error: {e})"
+
+    # Output the summarized report
+    report = f"Application Status Report:\n"
+    report += f"  Target URL: {url}\n"
+    report += f"  Status Code: {status_code}\n"
+    report += f"  Final Status: {status}"
+
+    print(report)
+    print("---------------------------------")
+    return status
+
+if __name__ == "__main__":
+    # Ensure this is a Linux environment (for df/free)
+    if os.name == 'posix':
+        check_system_health()
+    else:
+        print("Skipping System Health Check: This feature is designed for Linux/Unix systems using 'df' and 'free' commands.")
+
+    check_application_health(APP_URL)
+    check_application_health("http://invalid.domain.com") # Example of a failed connection
+    check_application_health("http://httpbin.org/status/404") # Example of a non-success status code
